@@ -91,9 +91,5 @@ VOLUME ["/app/database", "/app/storage", "/app/exports", "/app/logs"]
 
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=1h --timeout=30s --start-period=5s --retries=3 \
-    CMD node -e "require('fs').accessSync('/app/database/prices.db')" || exit 1
-
 # Start Nginx in daemon mode then start API (which owns scheduler)
-CMD ["bash", "-lc", "nginx; npm run api"]
+CMD ["sh", "-c", "nginx && npm run api"]
