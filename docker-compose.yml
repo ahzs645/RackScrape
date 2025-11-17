@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  rackscrape:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rackscrape
+    restart: unless-stopped
+    command: bash -c "nginx && npm run api"
+
+    environment:
+      # Environment variables
+      NODE_ENV: production
+      HEADLESS: "true"
+      DATABASE_PATH: /app/database/prices.db
+      SCRAPE_SCHEDULE: "30 3 * * *"  # 3:30 AM daily
+      TIMEZONE: America/New_York
+      MAX_RETRIES: 3
+      TIMEOUT_SECONDS: 60
+      LOG_LEVEL: info
+      RUN_ON_STARTUP: "false"
+
+    volumes:
+      # Persist data across container restarts
+      - ./database:/app/database
+      - ./storage:/app/storage
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+    ports:
+      - "3030:80"
+
+    # Override default command if needed
+    # command: npm run scrape  # Run once instead of scheduling
+
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network (optional)
+    # networks:
+    #   - scraper-network
+
+# Optional: Separate service for one-time scrape
+  rackscrape-once:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rackscrape-once
+    profiles: ["manual"]  # Only run when explicitly specified
+
+    environment:
+      NODE_ENV: production
+      HEADLESS: "true"
+      DATABASE_PATH: /app/database/prices.db
+
+    volumes:
+      - ./database:/app/database
+      - ./storage:/app/storage
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+
+    command: npm run scrape
+
+# Optional: Service for exports
+  rackscrape-export:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rackscrape-export
+    profiles: ["export"]  # Only run when explicitly specified
+
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /app/database/prices.db
+
+    volumes:
+      - ./database:/app/database
+      - ./exports:/app/exports
+
+    command: npm run export
+
+# Optional: Custom networks
+# networks:
+#   scraper-network:
+#     driver: bridge

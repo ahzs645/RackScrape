@@ -1,0 +1,75 @@
+# GitHub Actions workflow for daily scraping
+# This runs the scraper daily at 3:30 AM EST (8:30 AM UTC)
+
+name: Daily Rack Prices Scrape
+
+on:
+  # Schedule: Run daily at 8:30 AM UTC (3:30 AM EST)
+  schedule:
+    - cron: '30 8 * * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run scraper
+        run: npm run scrape
+        env:
+          NODE_ENV: production
+          HEADLESS: true
+
+      - name: Export data
+        run: npm run export all
+        if: success()
+
+      - name: Upload exports
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: rack-prices-exports-${{ github.run_number }}
+          path: exports/
+          retention-days: 30
+
+      - name: Upload database
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: database-${{ github.run_number }}
+          path: database/*.db
+          retention-days: 90
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
+
+      # Optional: Commit data back to repository
+      # - name: Commit data
+      #   run: |
+      #     git config --local user.email "action@github.com"
+      #     git config --local user.name "GitHub Action"
+      #     git add exports/ database/
+      #     git commit -m "Update rack prices data - $(date +'%Y-%m-%d')" || exit 0
+      #     git push

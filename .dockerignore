@@ -1,0 +1,50 @@
+# Node modules (will be installed in container)
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Generated data
+database/*.db
+database/*.db-journal
+storage/
+exports/
+logs/
+
+# Build output
+dist/
+build/
+
+# Development files
+.git/
+.github/
+.gitignore
+*.md
+!README.md
+
+# Environment files (will be set via docker-compose)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+*.test.ts
+*.spec.ts
+
+# Documentation (already copied what's needed)
+SETUP.md
+QUICKSTART.md
+PROJECT_SUMMARY.md
+
+# Claude
+.claude/
