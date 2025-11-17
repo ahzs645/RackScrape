@@ -28,7 +28,7 @@ services:
       - ./exports:/app/exports
       - ./logs:/app/logs
     ports:
-      - "3030:80"
+      - "3030:8080"
 
     # Override default command if needed
     # command: npm run scrape  # Run once instead of scheduling

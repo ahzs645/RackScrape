@@ -89,7 +89,7 @@ ENV PORT=3000
 # Expose volume mount points
 VOLUME ["/app/database", "/app/storage", "/app/exports", "/app/logs"]
 
-EXPOSE 80
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=1h --timeout=30s --start-period=5s --retries=3 \
