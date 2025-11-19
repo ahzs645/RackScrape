@@ -33,15 +33,19 @@ services:
     # Override default command if needed
     # command: npm run scrape  # Run once instead of scheduling
 
-    # Resource limits (optional)
+    # Resource limits for Docker Compose (non-swarm mode)
+    mem_limit: 2G
+    memswap_limit: 2G
+
+    # Resource limits for swarm mode (optional)
     deploy:
       resources:
         limits:
           cpus: '1'
-          memory: 1G
+          memory: 2G
         reservations:
           cpus: '0.5'
-          memory: 512M
+          memory: 1G
 
     # Logging configuration
     logging:

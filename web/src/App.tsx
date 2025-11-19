@@ -94,6 +94,7 @@ function App() {
   const [schedule, setSchedule] = useState<ScheduleStatus | null>(null);
   const [scheduleForm, setScheduleForm] = useState({ cronExpression: '', timezone: '' });
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [previousRuns, setPreviousRuns] = useState<RunRow[]>([]);
 
   useEffect(() => {
     fetchJSON<{ locations: string[] }>('/api/locations').then(res => {
@@ -121,6 +122,56 @@ function App() {
     refreshLatest();
     refreshHistory();
   }, [selectedLocation, pricingType, timeframe, customStart, customEnd]);
+
+  // Auto-refresh runs and stats
+  useEffect(() => {
+    // Check if any run is currently running
+    const hasRunningJobs = runs.some(run => run.status === 'running');
+
+    // Refresh more frequently if there's a running job (5s), otherwise every 15s
+    const intervalTime = hasRunningJobs ? 5000 : 15000;
+
+    const interval = setInterval(() => {
+      // Only refresh if the page is visible
+      if (document.visibilityState === 'visible') {
+        refreshRuns();
+        refreshStats();
+      }
+    }, intervalTime);
+
+    return () => clearInterval(interval);
+  }, [runs]); // Re-create interval when runs change (to adjust polling frequency)
+
+  // Detect when a run completes and refresh data
+  useEffect(() => {
+    if (previousRuns.length === 0) {
+      setPreviousRuns(runs);
+      return;
+    }
+
+    // Find runs that just completed (were running, now completed/failed)
+    const newlyCompleted = runs.filter(run => {
+      const prevRun = previousRuns.find(pr => pr.scrape_id === run.scrape_id);
+      return (
+        prevRun &&
+        prevRun.status === 'running' &&
+        (run.status === 'completed' || run.status === 'failed')
+      );
+    });
+
+    // If any runs just completed successfully, refresh latest prices and history
+    if (newlyCompleted.some(run => run.status === 'completed')) {
+      refreshLatest();
+      if (selectedLocation) {
+        refreshHistory();
+      }
+      setStatusMessage('New data available! Prices updated.');
+      // Clear message after 5 seconds
+      setTimeout(() => setStatusMessage(''), 5000);
+    }
+
+    setPreviousRuns(runs);
+  }, [runs]);
 
   const chartData = useMemo(() => {
     return history
@@ -457,15 +508,20 @@ function App() {
               <div className="text-sm text-slate-600">
                 Last run: {stats?.last_run_date ? format(new Date(stats.last_run_date), 'PPpp') : '—'}
               </div>
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <Server className="h-4 w-4" />
-                {schedule?.cronExpression ? (
-                  <span>
-                    Schedule: <code className="rounded bg-slate-100 px-2 py-1">{schedule.cronExpression}</code>{' '}
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm text-slate-700">
+                  <Server className="h-4 w-4" />
+                  {schedule?.cronExpression ? (
+                    <span className="font-medium">{cronToHumanReadable(schedule.cronExpression)}</span>
+                  ) : (
+                    'Schedule not set'
+                  )}
+                </div>
+                {schedule?.cronExpression && (
+                  <div className="ml-6 text-xs text-slate-500">
+                    <code className="rounded bg-slate-100 px-2 py-1">{schedule.cronExpression}</code>{' '}
                     ({schedule.timezone})
-                  </span>
-                ) : (
-                  'Schedule not set'
+                  </div>
                 )}
               </div>
             </CardContent>
@@ -537,10 +593,15 @@ function App() {
                   <div className="text-sm text-slate-600">No runs recorded yet.</div>
                 )}
               </div>
-              <Button variant="ghost" size="sm" onClick={refreshRuns}>
-                <Clock className="mr-2 h-4 w-4" />
-                Refresh list
-              </Button>
+              <div className="flex items-center justify-between">
+                <Button variant="ghost" size="sm" onClick={refreshRuns}>
+                  <Clock className="mr-2 h-4 w-4" />
+                  Refresh list
+                </Button>
+                <span className="text-xs text-slate-500">
+                  Auto-refresh: {runs.some(r => r.status === 'running') ? '5s' : '15s'}
+                </span>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -582,6 +643,62 @@ function badgeVariant(status: RunRow['status']) {
     default:
       return 'outline' as const;
   }
+}
+
+function cronToHumanReadable(cron: string): string {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return cron;
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+
+  // Handle common patterns
+  if (minute === '*' && hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return 'Every minute';
+  }
+
+  if (hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    return minute === '0' ? 'Every hour' : `Every hour at minute ${minute}`;
+  }
+
+  if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    const hourNum = parseInt(hour, 10);
+    const minuteNum = parseInt(minute, 10);
+
+    if (!isNaN(hourNum) && !isNaN(minuteNum)) {
+      const period = hourNum >= 12 ? 'PM' : 'AM';
+      const displayHour = hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+      const displayMinute = minuteNum.toString().padStart(2, '0');
+      return `Daily at ${displayHour}:${displayMinute} ${period}`;
+    }
+  }
+
+  if (month === '*' && dayOfWeek === '*' && !dayOfMonth.includes('*')) {
+    const hourNum = parseInt(hour, 10);
+    const minuteNum = parseInt(minute, 10);
+
+    if (!isNaN(hourNum) && !isNaN(minuteNum)) {
+      const period = hourNum >= 12 ? 'PM' : 'AM';
+      const displayHour = hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+      const displayMinute = minuteNum.toString().padStart(2, '0');
+      return `Monthly on day ${dayOfMonth} at ${displayHour}:${displayMinute} ${period}`;
+    }
+  }
+
+  if (month === '*' && dayOfMonth === '*' && !dayOfWeek.includes('*')) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const hourNum = parseInt(hour, 10);
+    const minuteNum = parseInt(minute, 10);
+    const dayNum = parseInt(dayOfWeek, 10);
+
+    if (!isNaN(hourNum) && !isNaN(minuteNum) && !isNaN(dayNum) && dayNum >= 0 && dayNum <= 6) {
+      const period = hourNum >= 12 ? 'PM' : 'AM';
+      const displayHour = hourNum > 12 ? hourNum - 12 : hourNum === 0 ? 12 : hourNum;
+      const displayMinute = minuteNum.toString().padStart(2, '0');
+      return `Every ${days[dayNum]} at ${displayHour}:${displayMinute} ${period}`;
+    }
+  }
+
+  return cron;
 }
 
 export default App;

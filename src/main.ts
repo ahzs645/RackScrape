@@ -1,10 +1,11 @@
 /**
  * Main entry point for the Petro-Canada rack prices scraper
  */
-import { PlaywrightCrawler, ProxyConfiguration } from 'crawlee';
+import { PlaywrightCrawler } from 'crawlee';
 import { router } from './routes.js';
-import { initializeDatabase, closeDatabase } from './storage/database.js';
+import { initializeDatabase, closeDatabase, startScrapeRun, completeScrapeRun } from './storage/database.js';
 import { CONFIG } from './config/constants.js';
+import { generateScrapeId } from './utils/helpers.js';
 import logger from './utils/logger.js';
 import dotenv from 'dotenv';
 
@@ -25,12 +26,22 @@ export async function runScraper() {
     const crawler = new PlaywrightCrawler({
       requestHandler: router,
 
-      // Browser settings
+      // Browser settings with anti-detection
       headless: process.env.HEADLESS !== 'false',
       launchContext: {
         launchOptions: {
-          timeout: 60000
-        }
+          timeout: 60000,
+          // Additional args to avoid detection
+          args: [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-dev-shm-usage',
+            '--no-sandbox',
+            '--disable-setuid-sandbox'
+          ]
+        },
+        // Use realistic browser context
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
       },
 
       // Request settings
@@ -45,6 +56,21 @@ export async function runScraper() {
       failedRequestHandler: async ({ request, log }, error) => {
         log.error(`Request ${request.url} failed after ${request.retryCount} retries:`, error);
         logger.error(`Request failed: ${request.url}`, { error: error.message });
+
+        // Record failed scrape to database
+        try {
+          const scrapeId = generateScrapeId();
+          await startScrapeRun(scrapeId);
+          await completeScrapeRun(
+            scrapeId,
+            0,
+            'failed',
+            error instanceof Error ? error.message : String(error)
+          );
+          logger.info(`Recorded failed scrape run: ${scrapeId}`);
+        } catch (dbError) {
+          logger.error('Error recording failed scrape:', dbError);
+        }
       },
 
       // Pre-navigation hook
@@ -52,12 +78,51 @@ export async function runScraper() {
         async ({ page, request, log }) => {
           log.info(`Navigating to ${request.url}`);
 
+          // Remove webdriver flag and other automation indicators
+          await page.addInitScript(() => {
+            // Override the navigator.webdriver flag
+            Object.defineProperty(navigator, 'webdriver', {
+              get: () => undefined
+            });
+
+            // Override permissions API
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters: any) => (
+              parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission } as PermissionStatus) :
+                originalQuery(parameters)
+            );
+
+            // Add Chrome runtime
+            (window as any).chrome = {
+              runtime: {}
+            };
+
+            // Mock plugins
+            Object.defineProperty(navigator, 'plugins', {
+              get: () => [1, 2, 3, 4, 5]
+            });
+
+            // Mock languages
+            Object.defineProperty(navigator, 'languages', {
+              get: () => ['en-US', 'en']
+            });
+          });
+
           // Set extra HTTP headers to appear more like a real browser
           await page.setExtraHTTPHeaders({
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
           });
+
+          // Set viewport to common desktop size
+          await page.setViewportSize({ width: 1920, height: 1080 });
         }
       ],
 
@@ -65,6 +130,10 @@ export async function runScraper() {
       postNavigationHooks: [
         async ({ page, log }) => {
           log.info('Page navigation completed');
+
+          // Small random delay to simulate human behavior
+          const delay = Math.floor(Math.random() * 1000) + 500; // 500-1500ms
+          await page.waitForTimeout(delay);
 
           // Take a screenshot for debugging (optional)
           if (process.env.NODE_ENV === 'development') {
