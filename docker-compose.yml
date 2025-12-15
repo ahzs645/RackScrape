@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   rackscrape:
     build:
@@ -8,6 +6,13 @@ services:
     container_name: rackscrape
     restart: unless-stopped
     command: bash -c "nginx && npm run api"
+
+    # Fix sysctl permission issue for unprivileged containers
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
+
+    # Use tini as init process (avoids systemd sysctl issues)
+    init: true
 
     environment:
       # Environment variables

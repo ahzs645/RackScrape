@@ -26,12 +26,13 @@ RUN npm run build:web
 # Stage 2: Production stage
 FROM node:20-slim
 
-# Install Playwright dependencies and nginx
+# Install Playwright dependencies, nginx, and tzdata for timezone support
 # This installs system dependencies needed for Chromium
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
     nginx \
+    tzdata \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -78,7 +79,7 @@ COPY --from=builder /app/nginx/default.conf /etc/nginx/conf.d/default.conf
 RUN rm -f /etc/nginx/sites-enabled/default
 
 # Create directories for data persistence
-RUN mkdir -p /app/database /app/storage /app/exports /app/logs
+RUN mkdir -p /app/database /app/storage /app/exports /app/logs /app/uploads
 
 # Set environment variables
 ENV NODE_ENV=production

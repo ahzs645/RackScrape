@@ -10,7 +10,7 @@ import {
   YAxis
 } from 'recharts';
 import { format, subDays } from 'date-fns';
-import { Download, RefreshCw, Server, Clock, Play } from 'lucide-react';
+import { Download, RefreshCw, Server, Clock, Play, Database, Upload } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Select } from './components/ui/select';
@@ -64,6 +64,14 @@ interface ScheduleStatus {
   lastRun?: string | null;
 }
 
+interface DatabaseStats {
+  totalRecords: number;
+  totalRuns: number;
+  oldestRecord: string | null;
+  newestRecord: string | null;
+  fileSizeBytes: number;
+}
+
 const pricingOptions: { label: string; value: PricingType }[] = [
   { label: 'Daily', value: 'daily' },
   { label: 'Weekly Average', value: 'weekly-average' },
@@ -95,6 +103,8 @@ function App() {
   const [scheduleForm, setScheduleForm] = useState({ cronExpression: '', timezone: '' });
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [previousRuns, setPreviousRuns] = useState<RunRow[]>([]);
+  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     fetchJSON<{ locations: string[] }>('/api/locations').then(res => {
@@ -107,6 +117,7 @@ function App() {
     refreshStats();
     refreshRuns();
     fetchSchedule();
+    fetchDbStats();
   }, []);
 
   useEffect(() => {
@@ -295,6 +306,67 @@ function App() {
     } catch (error) {
       setStatusMessage('Failed to start scrape.');
     }
+  }
+
+  async function fetchDbStats() {
+    try {
+      const res = await fetchJSON<{ data: DatabaseStats }>('/api/database/stats');
+      setDbStats(res.data);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function handleDatabaseImport(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setStatusMessage('Importing database...');
+
+    try {
+      const formData = new FormData();
+      formData.append('database', file);
+
+      const resp = await fetch(`${API_BASE}/api/database/import`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!resp.ok) {
+        throw new Error(await resp.text());
+      }
+
+      const result = await resp.json();
+      setDbStats(result.data);
+      setStatusMessage('Database imported successfully! Refreshing data...');
+
+      // Refresh all data
+      await Promise.all([
+        refreshLatest(),
+        refreshHistory(),
+        refreshRuns(),
+        refreshStats(),
+        fetchSchedule()
+      ]);
+
+      setStatusMessage('Database imported and data refreshed.');
+    } catch (error) {
+      setStatusMessage('Failed to import database.');
+      console.error(error);
+    } finally {
+      setImporting(false);
+      // Reset the file input
+      event.target.value = '';
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
   const downloadAllHref = '/api/export/latest';
@@ -601,6 +673,66 @@ function App() {
                 <span className="text-xs text-slate-500">
                   Auto-refresh: {runs.some(r => r.status === 'running') ? '5s' : '15s'}
                 </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="h-5 w-5" />
+                Database management
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {dbStats && (
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="text-slate-600">Records:</div>
+                  <div className="font-medium">{dbStats.totalRecords.toLocaleString()}</div>
+                  <div className="text-slate-600">Scrape runs:</div>
+                  <div className="font-medium">{dbStats.totalRuns.toLocaleString()}</div>
+                  <div className="text-slate-600">Date range:</div>
+                  <div className="font-medium">
+                    {dbStats.oldestRecord && dbStats.newestRecord
+                      ? `${dbStats.oldestRecord} - ${dbStats.newestRecord}`
+                      : 'No data'}
+                  </div>
+                  <div className="text-slate-600">File size:</div>
+                  <div className="font-medium">{formatBytes(dbStats.fileSizeBytes)}</div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <Button asChild variant="outline" size="sm" className="w-full">
+                  <a href="/api/database/export">
+                    <Download className="mr-2 h-4 w-4" />
+                    Export database backup
+                  </a>
+                </Button>
+
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept=".db"
+                    onChange={handleDatabaseImport}
+                    disabled={importing}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                    id="db-import"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full pointer-events-none"
+                    disabled={importing}
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    {importing ? 'Importing...' : 'Import database backup'}
+                  </Button>
+                </div>
+
+                <p className="text-xs text-slate-500">
+                  Export to backup your data before switching deployments. Import to restore from a backup.
+                </p>
               </div>
             </CardContent>
           </Card>

@@ -12,8 +12,12 @@ import {
   getLatestPrices,
   getPriceHistory,
   getScrapeRunStats,
-  getScrapeRuns
+  getScrapeRuns,
+  getDatabasePath,
+  importDatabase,
+  getDatabaseStats
 } from './storage/database.js';
+import multer from 'multer';
 import {
   exportAllLatestToCSV,
   exportLocationHistory
@@ -33,6 +37,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = join(__dirname, '..');
 const uiDistPath = join(rootDir, 'web', 'dist');
+
+// Configure multer for database upload
+const upload = multer({
+  dest: join(rootDir, 'uploads'),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
+  fileFilter: (_req, file, cb) => {
+    // Only allow .db files
+    if (file.originalname.endsWith('.db') || file.mimetype === 'application/octet-stream') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .db files are allowed'));
+    }
+  }
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
@@ -161,6 +179,50 @@ app.get('/api/export/location', async (req, res) => {
   } catch (error) {
     logger.error('Failed to export location history', error);
     res.status(500).json({ error: 'Failed to export data' });
+  }
+});
+
+// Database management endpoints
+app.get('/api/database/stats', async (_req, res) => {
+  try {
+    const stats = await getDatabaseStats();
+    res.json({ data: stats });
+  } catch (error) {
+    logger.error('Failed to get database stats', error);
+    res.status(500).json({ error: 'Failed to get database stats' });
+  }
+});
+
+app.get('/api/database/export', async (_req, res) => {
+  try {
+    const dbPath = getDatabasePath();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    res.download(dbPath, `rackscrape-backup-${timestamp}.db`);
+  } catch (error) {
+    logger.error('Failed to export database', error);
+    res.status(500).json({ error: 'Failed to export database' });
+  }
+});
+
+app.post('/api/database/import', upload.single('database'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No database file provided' });
+    }
+
+    await importDatabase(req.file.path);
+
+    // Restart the scheduler to pick up any new schedule settings
+    await scheduleService.start();
+
+    const stats = await getDatabaseStats();
+    res.json({
+      message: 'Database imported successfully',
+      data: stats
+    });
+  } catch (error) {
+    logger.error('Failed to import database', error);
+    res.status(500).json({ error: 'Failed to import database' });
   }
 });
 
