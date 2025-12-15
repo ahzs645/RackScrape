@@ -26,12 +26,11 @@ RUN npm run build:web
 # Stage 2: Production stage
 FROM node:20-slim
 
-# Install Playwright dependencies, nginx, and tzdata for timezone support
-# This installs system dependencies needed for Chromium
-RUN apt-get update && apt-get install -y \
+# Install Playwright dependencies and tzdata for timezone support
+# Note: nginx runs as a separate container (nginx:alpine) to avoid systemd dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     ca-certificates \
-    nginx \
     tzdata \
     fonts-liberation \
     libasound2 \
@@ -72,11 +71,8 @@ RUN npx playwright install chromium
 # Copy application code from builder
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./
-COPY --from=builder /app/web/dist /usr/share/nginx/html
 COPY --from=builder /app/web/dist ./web/dist
 COPY --from=builder /app/database ./database
-COPY --from=builder /app/nginx/default.conf /etc/nginx/conf.d/default.conf
-RUN rm -f /etc/nginx/sites-enabled/default
 
 # Create directories for data persistence
 RUN mkdir -p /app/database /app/storage /app/exports /app/logs /app/uploads
@@ -90,7 +86,7 @@ ENV PORT=3000
 # Expose volume mount points
 VOLUME ["/app/database", "/app/storage", "/app/exports", "/app/logs"]
 
-EXPOSE 8080
+EXPOSE 3000
 
-# Start Nginx in daemon mode then start API (which owns scheduler)
-CMD ["sh", "-c", "nginx && npm run api"]
+# Start API server (nginx runs as separate container)
+CMD ["npm", "run", "api"]

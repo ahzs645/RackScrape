@@ -1,17 +1,13 @@
 services:
-  rackscrape:
+  # API service (Node.js with Playwright)
+  api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: rackscrape
+    container_name: rackscrape-api
     restart: unless-stopped
-    command: bash -c "nginx && npm run api"
-
-    # Use tini as init process (avoids systemd sysctl issues)
-    init: true
 
     environment:
-      # Environment variables
       NODE_ENV: production
       HEADLESS: "true"
       DATABASE_PATH: /app/database/prices.db
@@ -21,24 +17,24 @@ services:
       TIMEOUT_SECONDS: 60
       LOG_LEVEL: info
       RUN_ON_STARTUP: "false"
+      PORT: 3000
 
     volumes:
-      # Persist data across container restarts
       - ./database:/app/database
       - ./storage:/app/storage
       - ./exports:/app/exports
       - ./logs:/app/logs
-    ports:
-      - "3030:8080"
 
-    # Override default command if needed
-    # command: npm run scrape  # Run once instead of scheduling
+    expose:
+      - "3000"
 
-    # Resource limits for Docker Compose (non-swarm mode)
+    networks:
+      - rackscrape
+
+    # Resource limits
     mem_limit: 2G
     memswap_limit: 2G
 
-    # Resource limits for swarm mode (optional)
     deploy:
       resources:
         limits:
@@ -48,18 +44,33 @@ services:
           cpus: '0.5'
           memory: 1G
 
-    # Logging configuration
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-    # Network (optional)
-    # networks:
-    #   - scraper-network
+  # Nginx reverse proxy (serves static files + proxies API)
+  nginx:
+    image: nginx:alpine
+    container_name: rackscrape-nginx
+    restart: unless-stopped
+    ports:
+      - "3030:8080"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    networks:
+      - rackscrape
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-# Optional: Separate service for one-time scrape
+  # Optional: Separate service for one-time scrape
   rackscrape-once:
     build:
       context: .
@@ -78,9 +89,12 @@ services:
       - ./exports:/app/exports
       - ./logs:/app/logs
 
+    networks:
+      - rackscrape
+
     command: npm run scrape
 
-# Optional: Service for exports
+  # Optional: Service for exports
   rackscrape-export:
     build:
       context: .
@@ -96,9 +110,11 @@ services:
       - ./database:/app/database
       - ./exports:/app/exports
 
+    networks:
+      - rackscrape
+
     command: npm run export
 
-# Optional: Custom networks
-# networks:
-#   scraper-network:
-#     driver: bridge
+networks:
+  rackscrape:
+    driver: bridge
