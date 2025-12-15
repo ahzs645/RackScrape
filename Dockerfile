@@ -2,7 +2,8 @@
 # Optimized for production use with minimal image size
 
 # Stage 1: Build stage
-FROM node:20-slim AS builder
+# Using bullseye-slim to avoid systemd dependency chain issues in Debian 12 (bookworm)
+FROM node:20-bullseye-slim AS builder
 
 WORKDIR /app
 
@@ -24,7 +25,8 @@ COPY database ./database
 RUN npm run build:web
 
 # Stage 2: Production stage
-FROM node:20-slim
+# Using bullseye-slim to avoid systemd dependency chain issues in Debian 12 (bookworm)
+FROM node:20-bullseye-slim
 
 # Install Playwright dependencies and tzdata for timezone support
 # Note: nginx runs as a separate container (nginx:alpine) to avoid systemd dependencies
