@@ -8,8 +8,8 @@ pnpm-lock.yaml
 dist/
 build/
 
-# Crawlee storage
-storage/
+# Crawlee storage (root level only, not src/storage)
+/storage/
 
 # Database
 database/*.db
